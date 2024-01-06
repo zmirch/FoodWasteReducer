@@ -444,72 +444,99 @@ void respond(void *arg)
             strcpy(buf, "Error: Syntax is as follows: request <meat/produce/dairy/bread> <amount>. Use the 'help' command for more details.");
           }
           else
-          { // first, we check if there is ANY amount of said product
-            sprintf(requestQuery, "SELECT * FROM Products WHERE Category = '%s'", productType);
-            int resultCount = 0;
-            rc = sqlite3_exec(db, requestQuery, CheckExistenceCallback, &resultCount, &errMsg);
-
-            if (rc != SQLITE_OK)
+          { 
+            if(requestedAmount > 0)
             {
-              fprintf(stderr, "SQL error: %s\n", errMsg);
-              sqlite3_free(errMsg);
+              // first, we check if there is ANY amount of said product
+              sprintf(requestQuery, "SELECT * FROM Products WHERE Category = '%s'", productType);
+              int resultCount = 0;
+              rc = sqlite3_exec(db, requestQuery, CheckExistenceCallback, &resultCount, &errMsg);
+
+              if (rc != SQLITE_OK)
+              {
+                fprintf(stderr, "SQL error: %s\n", errMsg);
+                sqlite3_free(errMsg);
+              }
+              else
+              {
+                if (resultCount > 0) // if there is a donation in the database of this product category
+                {
+                  int resultAmount = 0;
+                  sprintf(requestQuery, "SELECT Amount FROM Products WHERE Category = '%s' LIMIT 1", productType);
+                  //rc = sqlite3_exec(db, requestQuery, CheckAmountCallback, &resultAmount, &errMsg);
+
+                  int retval, idx;
+                  sqlite3_stmt* stmt = NULL;
+                  retval = sqlite3_prepare_v2(db, requestQuery, -1, &stmt, 0);
+
+                  if (retval != SQLITE_OK)
+                  {
+                    fprintf(stderr, "Cannot bind parameter: %s\n", sqlite3_errmsg(db));
+                    return rc;
+                  }
+
+                  rc = sqlite3_step(stmt);
+
+                  if (rc == SQLITE_ROW) 
+                  {
+                    // fetch the result
+                    resultAmount = sqlite3_column_int(stmt, 0);
+                    printf("Amount of product available: %d. Amount of product requested: %d.\n", resultAmount, requestedAmount);
+                    //snprintf(buf, sizeof(buf), "%d", resultAmount);
+
+                    // check size
+                    if (requestedAmount < resultAmount)
+                    {
+                      sprintf(alterQuery, "UPDATE Products SET Amount = %d WHERE Category = '%s' LIMIT 1", resultAmount - requestedAmount, productType); // WHERE DonationID = ....
+
+                      rc = sqlite3_exec(db, alterQuery, 0, 0, &errMsg);
+                      if (rc != SQLITE_OK)
+                      {
+                        fprintf(stderr, "SQL error: %s\n", errMsg);
+                        sqlite3_free(errMsg);
+                      }
+                      else
+                      {
+                        strcpy(buf, "Request succeeded. Database has been updated accordingly.");
+                      }
+                    }
+                    else if (requestedAmount == resultAmount)
+                    {
+                      sprintf(alterQuery, "DELETE FROM Products WHERE Category = '%s' LIMIT 1", productType);
+
+                      rc = sqlite3_exec(db, alterQuery, 0, 0, &errMsg);
+                      if (rc != SQLITE_OK)
+                      {
+                        fprintf(stderr, "SQL error: %s\n", errMsg);
+                        sqlite3_free(errMsg);
+                      }
+                      else
+                      {
+                        strcpy(buf, "Request succeeded. Database has been updated accordingly.");
+                      }
+                      
+                    }
+                    else
+                    {
+                      strcpy(buf, "Not enough product available. Please try again later.");
+                    }
+
+                  } else if (rc == SQLITE_DONE) {
+                    printf("No rows found.\n");
+                  } else {
+                    fprintf(stderr, "Error executing statement: %s\n", sqlite3_errmsg(db));
+                  }
+                  sqlite3_finalize(stmt);
+                }
+              }
+
             }
             else
             {
-              if (resultCount > 0) // if there is a donation in the database of this product category
-              {
-                int resultAmount = 0;
-                sprintf(requestQuery, "SELECT Amount FROM Products WHERE Category = '%s' LIMIT 1", productType);
-                //rc = sqlite3_exec(db, requestQuery, CheckAmountCallback, &resultAmount, &errMsg);
-
-                int retval, idx;
-                sqlite3_stmt* stmt = NULL;
-                retval = sqlite3_prepare_v2(db, requestQuery, -1, &stmt, 0);
-
-                if (retval != SQLITE_OK)
-                {
-                  fprintf(stderr, "Cannot bind parameter: %s\n", sqlite3_errmsg(db));
-                  return rc;
-                }
-
-                rc = sqlite3_step(stmt);
-
-                if (rc == SQLITE_ROW) 
-                {
-                  // fetch the result
-                  resultAmount = sqlite3_column_int(stmt, 0);
-                  printf("Amount of product available: %d. Amount of product requested: %d.\n", resultAmount, requestedAmount);
-                  //snprintf(buf, sizeof(buf), "%d", resultAmount);
-
-                  // check size
-                  if (requestedAmount < resultAmount)
-                  {
-                    sprintf(alterQuery, "UPDATE Products SET Amount = %d WHERE Category = '%s' LIMIT 1", resultAmount - requestedAmount, productType); // WHERE DonationID = ....
-                    strcpy(buf, "altering table");
-                  }
-                  else if (requestedAmount == resultAmount)
-                  {
-                    sprintf(alterQuery, "DELETE FROM Products WHERE Category = '%s' LIMIT 1", productType);
-                    strcpy(buf, "modifying table");
-                  }
-                  else
-                  {
-                    strcpy(buf, "Not enough product available. Please try again later.");
-                  }
-
-                } else if (rc == SQLITE_DONE) {
-                  printf("No rows found.\n");
-                } else {
-                  fprintf(stderr, "Error executing statement: %s\n", sqlite3_errmsg(db));
-                }
-
-
-                sqlite3_finalize(stmt);
-              }
+              strcpy(buf, "Error: Product amount must be a positive integer.");
             }
+            
           }
-
-          
 
           sqlite3_close(db);
         }
